@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PickCrafter JS Edition</title>
+    <style>
+        * { box-sizing: border-box; user-select: none; font-family: 'Courier New', monospace; }
+        body { margin: 0; padding: 0; background: #0f0f13; color: #fff; display: flex; height: 100vh; overflow: hidden; }
+        
+        #game-stage { flex: 1; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        canvas { background: #181820; cursor: pointer; border-radius: 12px; box-shadow: 0 0 20px rgba(0,0,0,0.8); }
+        
+        #hud { position: absolute; top: 20px; text-align: center; pointer-events: none; }
+        .title { font-size: 2rem; color: #ffcc00; text-shadow: 2px 2px #000; margin: 0; }
+        .stat { font-size: 1.2rem; margin-top: 5px; text-shadow: 1px 1px #000; }
+        
+        #sidebar { width: 320px; background: #13131a; border-left: 2px solid #252533; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        
+        .btn { background: #222230; color: #fff; border: 1px solid #444460; padding: 12px; border-radius: 6px; cursor: pointer; text-align: left; transition: 0.15s; }
+        .btn:hover:not(:disabled) { background: #2f2f45; border-color: #ffcc00; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-title { font-weight: bold; color: #ffcc00; display: block; }
+        .btn-sub { font-size: 0.8rem; color: #aaa; }
+
+        .floating-text { position: absolute; color: #ffcc00; font-weight: bold; font-size: 1.5rem; pointer-events: none; animation: float 0.6s ease-out forwards; text-shadow: 2px 2px #000; }
+        @keyframes float { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-40px); } }
+    </style>
+</head>
+<body>
+
+    <div id="game-stage">
+        <div id="hud">
+            <h1 class="title">PICKCRAFTER JS</h1>
+            <div class="stat">Blöcke: <span id="val-blocks">0</span></div>
+            <div class="stat" style="color: #aaa; font-size: 0.9rem;">Biome: <span id="val-biome">Erde</span></div>
+        </div>
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+    </div>
+
+    <div id="sidebar">
+        <h2 style="margin-top:0; color:#ffcc00;">UPGRADES</h2>
+        
+        <button id="btn-click" class="btn" onclick="buyUpgrade('click')">
+            <span class="btn-title">Spitzhacke (+1/Klick)</span>
+            <span class="btn-sub">Kosten: <span id="cost-click">10</span> Blöcke</span>
+        </button>
+
+        <button id="btn-auto" class="btn" onclick="buyUpgrade('auto')">
+            <span class="btn-title">Auto-Miner (+1/Sek)</span>
+            <span class="btn-sub">Kosten: <span id="cost-auto">25</span> Blöcke</span>
+        </button>
+
+        <button id="btn-tnt" class="btn" onclick="useTNT()">
+            <span class="btn-title">💣 TNT-Sprengung</span>
+            <span class="btn-sub">Kosten: 50 Blöcke (Gibt 150)</span>
+        </button>
+
+        <h2 style="color:#ffcc00; margin-bottom: 5px;">OPTIONEN</h2>
+        <button class="btn" onclick="saveGame()">💾 Spielstand Speichern</button>
+        <button class="btn" onclick="resetGame()" style="border-color: #aa3333;">🗑️ Zurücksetzen</button>
+    </div>
+
+    <script>
+        // === GAME STATE ===
+        let game = {
+            blocks: 0,
+            clickPower: 1,
+            autoPower: 0,
+            biomeIndex: 0,
+            costs: { click: 10, auto: 25 }
+        };
+
+        const biomes = [
+            { name: "Erde", color: "#557a2b", innerColor: "#8b5a2b" },
+            { name: "Stein", color: "#777777", innerColor: "#555555" },
+            { name: "Eisen", color: "#d8d8d8", innerColor: "#aaaaaa" },
+            { name: "Gold", color: "#ffd700", innerColor: "#ccac00" },
+            { name: "Diamant", color: "#00ffff", innerColor: "#00aaaa" }
+        ];
+
+        // === CANVAS & ANIMATION SETUP ===
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let blockScale = 1;
+
+        function drawBlock() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const currentBiome = biomes[game.biomeIndex];
+            const size = 160 * blockScale;
+            const x = (canvas.width - size) / 2;
+            const y = (canvas.height - size) / 2;
+
+            // Block Outer Wall
+            ctx.fillStyle = currentBiome.color;
+            ctx.fillRect(x, y, size, size);
+
+            // Block Inner Texture
+            ctx.fillStyle = currentBiome.innerColor;
+            ctx.fillRect(x + (size * 0.2), y + (size * 0.2), size * 0.6, size * 0.6);
+
+            // Render Particle Effects
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, p.size, p.size);
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.03;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+
+            requestAnimationFrame(drawBlock);
+        }
+
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 12; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: (Math.random() - 0.5) * 8,
+                    size: Math.random() * 8 + 4,
+                    color: color,
+                    life: 1.0
+                });
+            }
+        }
+
+        // === AUDIO SYNTHESIZER (No external sound files) ===
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(freq, duration) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        // === USER INTERACTION ===
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+            game.blocks += game.clickPower;
+            playSound(120 + Math.random() * 30, 0.08);
+            createParticles(clickX, clickY, biomes[game.biomeIndex].color);
+
+            // Click Scale Effect
+            blockScale = 0.9;
+            setTimeout(() => blockScale = 1, 60);
+
+            // Floating Text UI Effect
+            showFloatingText(e.clientX, e.clientY, `+${game.clickPower}`);
+            checkBiomeProgression();
+            updateUI();
+        });
+
+        function showFloatingText(x, y, text) {
+            const el = document.createElement('div');
+            el.className = 'floating-text';
+            el.innerText = text;
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 600);
+        }
+
+        // === LOGIC & UPGRADES ===
+        function buyUpgrade(type) {
+            if (game.blocks >= game.costs[type]) {
+                game.blocks -= game.costs[type];
+                if (type === 'click') {
+                    game.clickPower += 1;
+                    game.costs.click = Math.floor(game.costs.click * 1.5);
+                } else if (type === 'auto') {
+                    game.autoPower += 1;
+                    game.costs.auto = Math.floor(game.costs.auto * 1.6);
+                }
+                updateUI();
+            }
+        }
+
+        function useTNT() {
+            if (game.blocks >= 50) {
+                game.blocks -= 50;
+                game.blocks += 150;
+                playSound(60, 0.3);
+                createParticles(canvas.width / 2, canvas.height / 2, "#ff4444");
+                checkBiomeProgression();
+                updateUI();
+            }
+        }
+
+        function checkBiomeProgression() {
+            let nextIndex = Math.floor(game.blocks / 100);
+            if (nextIndex < biomes.length && nextIndex !== game.biomeIndex) {
+                game.biomeIndex = nextIndex;
+            }
+        }
+
+        // Auto-Miner Loop
+        setInterval(() => {
+            if (game.autoPower > 0) {
+                game.blocks += game.autoPower;
+                checkBiomeProgression();
+                updateUI();
+            }
+        }, 1000);
+
+        function updateUI() {
+            document.getElementById('val-blocks').innerText = game.blocks;
+            document.getElementById('val-biome').innerText = biomes[game.biomeIndex].name;
+            document.getElementById('cost-click').innerText = game.costs.click;
+            document.getElementById('cost-auto').innerText = game.costs.auto;
+
+            document.getElementById('btn-click').disabled = game.blocks < game.costs.click;
+            document.getElementById('btn-auto').disabled = game.blocks < game.costs.auto;
+            document.getElementById('btn-tnt').disabled = game.blocks < 50;
+        }
+
+        // === SAVE SYSTEM (LocalStorage) ===
+        function saveGame() {
+            localStorage.setItem('pickcrafter_js_save', JSON.stringify(game));
+            alert("Spielstand gespeichert!");
+        }
+
+        function loadGame() {
+            const saved = localStorage.getItem('pickcrafter_js_save');
+            if (saved) {
+                game = JSON.parse(saved);
+            }
+            updateUI();
+        }
+
+        function resetGame() {
+            if (confirm("Möchtest du deinen Spielstand wirklich zurücksetzen?")) {
+                localStorage.removeItem('pickcrafter_js_save');
+                location.reload();
+            }
+        }
+
+        // Startup
+        loadGame();
+        drawBlock();
+    </script>
+</body>
+</html>
