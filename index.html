@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PickCrafter Mega Edition</title>
+    <style>
+        :root {
+            --bg-main: #0a0a0f;
+            --panel: #14141f;
+            --border: #28283d;
+            --gold: #ffcc00;
+            --purple: #a855f7;
+            --cyan: #06b6d4;
+            --red: #ef4444;
+            --green: #22c55e;
+        }
+        * { box-sizing: border-box; user-select: none; font-family: 'Segoe UI', system-ui, sans-serif; }
+        body { margin: 0; padding: 0; background: var(--bg-main); color: #fff; display: flex; height: 100vh; overflow: hidden; }
+
+        #app { display: flex; width: 100vw; height: 100vh; }
+        #view-3d { flex: 1; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #canvas-render { width: 100%; height: 100%; cursor: pointer; }
+
+        /* HUD Header */
+        #hud-header { position: absolute; top: 15px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; z-index: 10; }
+        .hud-row { display: flex; gap: 12px; }
+        .pill { background: rgba(10, 10, 15, 0.85); backdrop-filter: blur(8px); padding: 6px 16px; border-radius: 20px; border: 1px solid var(--border); font-weight: bold; font-size: 0.9rem; }
+        
+        /* Health / Boss Bar */
+        #hp-wrap { width: 300px; height: 14px; background: #1f1f2e; border-radius: 7px; overflow: hidden; border: 1px solid var(--border); display: none; }
+        #hp-bar { width: 100%; height: 100%; background: linear-gradient(90deg, #f43f5e, #e11d48); transition: width 0.1s linear; }
+
+        /* Ability Bar */
+        #ability-bar { position: absolute; bottom: 20px; display: flex; gap: 12px; z-index: 10; }
+        .abi-slot { width: 56px; height: 56px; background: rgba(20, 20, 31, 0.9); border: 2px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; font-size: 1.4rem; position: relative; transition: 0.2s; }
+        .abi-slot:hover:not(.locked) { border-color: var(--gold); transform: translateY(-3px); }
+        .abi-slot.locked { opacity: 0.3; cursor: not-allowed; }
+        .abi-cd { position: absolute; bottom: 2px; font-size: 0.65rem; font-weight: bold; color: var(--gold); }
+
+        /* Sidebar Panels */
+        #sidebar { width: 420px; background: var(--panel); border-left: 2px solid var(--border); display: flex; flex-direction: column; }
+        .nav-tabs { display: flex; background: #0d0d14; border-bottom: 2px solid var(--border); overflow-x: auto; }
+        .nav-tabs button { flex: 1; padding: 14px 8px; background: none; border: none; color: #6b7280; font-weight: bold; font-size: 0.75rem; cursor: pointer; white-space: nowrap; transition: 0.2s; }
+        .nav-tabs button.active { color: var(--gold); border-bottom: 2px solid var(--gold); background: var(--panel); }
+
+        .panel-body { flex: 1; padding: 16px; overflow-y: auto; display: none; flex-direction: column; gap: 12px; }
+        .panel-body.active { display: flex; }
+
+        /* UI Cards */
+        .card { background: #1a1a29; border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .card-meta { display: flex; flex-direction: column; gap: 2px; }
+        .card-title { font-weight: bold; font-size: 0.9rem; }
+        .card-desc { font-size: 0.75rem; color: #9ca3af; }
+        
+        .btn-ui { background: var(--green); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; font-weight: bold; font-size: 0.8rem; cursor: pointer; transition: 0.2s; }
+        .btn-ui:hover:not(:disabled) { filter: brightness(1.15); }
+        .btn-ui:disabled { background: #2a2a3d; color: #4b5563; cursor: not-allowed; }
+
+        /* Crate Spinner Modal */
+        #crate-modal { position: absolute; inset: 0; background: rgba(0,0,0,0.85); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(5px); }
+        #spinner-box { width: 320px; height: 80px; border: 2px solid var(--gold); border-radius: 8px; overflow: hidden; position: relative; background: #111; margin: 20px 0; }
+        #spinner-track { display: flex; position: absolute; left: 0; top: 0; height: 100%; transition: transform 3s cubic-bezier(0.15, 0.9, 0.2, 1); }
+        .spinner-item { width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; font-size: 2rem; border-right: 1px solid #222; flex-shrink: 0; }
+        #spinner-marker { position: absolute; top: 0; left: 159px; width: 2px; height: 100%; background: var(--red); z-index: 2; }
+
+        /* Floating FX */
+        .pop-text { position: absolute; font-weight: 900; font-size: 1.3rem; pointer-events: none; animation: popUp 0.6s ease-out forwards; text-shadow: 2px 2px 0 #000; z-index: 50; }
+        @keyframes popUp { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(-40px) scale(1.1); } }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<div id="app">
+    <div id="view-3d">
+        <div id="hud-header">
+            <h1 style="margin:0; font-size:1.8rem; color:var(--gold); text-shadow:0 0 10px rgba(255,204,0,0.3);">PICKCRAFTER MEGA</h1>
+            <div class="hud-row">
+                <div class="pill">⛏️ <span id="val-blocks">0</span></div>
+                <div class="pill" style="color:var(--purple)">🔮 <span id="val-runes">0</span></div>
+                <div class="pill" style="color:var(--cyan)">🌍 <span id="val-biome">Ebene</span></div>
+            </div>
+            <div id="hp-wrap"><div id="hp-bar"></div></div>
+        </div>
+
+        <canvas id="canvas-render"></canvas>
+
+        <div id="ability-bar">
+            <div class="abi-slot" id="slot-tnt" onclick="castAbility('tnt')">💣<span class="abi-cd" id="cd-tnt"></span></div>
+            <div class="abi-slot" id="slot-drill" onclick="castAbility('drill')">🌀<span class="abi-cd" id="cd-drill"></span></div>
+            <div class="abi-slot" id="slot-nuke" onclick="castAbility('nuke')">☢️<span class="abi-cd" id="cd-nuke"></span></div>
+        </div>
+
+        <!-- Crate Unboxing Overlay -->
+        <div id="crate-modal">
+            <h2 style="color:var(--gold); margin:0;">TRUHE WIRD GEÖFFNET...</h2>
+            <div id="spinner-box">
+                <div id="spinner-marker"></div>
+                <div id="spinner-track"></div>
+            </div>
+            <button class="btn-ui" id="btn-claim" style="display:none;" onclick="closeCrateModal()">Einsammeln!</button>
+        </div>
+    </div>
+
+    <div id="sidebar">
+        <div class="nav-tabs">
+            <button class="active" onclick="switchTab('upgrades')">Upgrades</button>
+            <button onclick="switchTab('gear')">Ausrüstung</button>
+            <button onclick="switchTab('crates')">Truhen</button>
+            <button onclick="switchTab('artifacts')">Artefakte</button>
+            <button onclick="switchTab('prestige')">Transzendenz</button>
+        </div>
+
+        <!-- UPGRADES PANEL -->
+        <div id="tab-upgrades" class="panel-body active">
+            <div class="card">
+                <div class="card-meta">
+                    <span class="card-title">Klick-Kraft</span>
+                    <span class="card-desc">+1 Schaden pro Klick</span>
+                    <span class="card-desc">Kosten: <span id="c-click">10</span> Blöcke</span>
+                </div>
+                <button class="btn-ui" id="b-click" onclick="buy('click')">Upgrade</button>
+            </div>
+            <div class="card">
+                <div class="card-meta">
+                    <span class="card-title">Auto-Miner</span>
+                    <span class="card-desc">+1 Block/Sekunde</span>
+                    <span class="card-desc">Kosten: <span id="c-auto">25</span> Blöcke</span>
+                </div>
+                <button class="btn-ui" id="b-auto" onclick="buy('auto')">Upgrade</button>
+            </div>
+            <div class="card">
+                <div class="card-meta">
+                    <span class="card-title">Kritische Chance</span>
+                    <span class="card-desc">+2% Chance auf 5x Schaden</span>
+                    <span class="card-desc">Kosten: <span id="c-crit">100</span> Blöcke</span>
+                </div>
+                <button class="btn-ui" id="b-crit" onclick="buy('crit')">Upgrade</button>
+            </div>
+        </div>
+
+        <!-- GEAR & PICKAXES -->
+        <div id="tab-gear" class="panel-body">
+            <div class="card">
+                <div class="card-meta">
+                    <span class="card-title">Holz-Spitzhacke</span>
+                    <span class="card-desc">1x Multiplikator</span>
+                </div>
+                <button class="btn-ui" onclick="equipPick(1, 0x8b5a2b)">Ausrüsten</button>
+            </div>
+            <div class="card">
+                <div class="card-meta">
+                    <span class="card-title">Eisen-Spitzhacke</span>
+                    <span class="card-desc">3x Multiplikator | 500 Blöcke</span>
+                </div>
+                <button class="btn-ui" id="b-pick-iron" onclick="buyPick('iron', 500, 3, 0xd1d5db)">Kaufen</button>
+            </div>
+            <div class="card">
+                <div class="card-meta">
+                    <span class="card-title">Magma-Spitzhacke</span>
+                    <span class="card-desc">10x Multiplikator | 5000 Blöcke</span>
+                </div>
+                <button class="btn-ui" id="b-pick-fire" onclick="buyPick('fire', 5000, 10, 0xef4444)">Kaufen</button>
+            </div>
+        </div>
+
+        <!-- CRATES -->
+        <div id="tab-crates" class="panel-body">
+            <div class="card">
+                <div class="card-meta">
+                    <span class="card-title">Klassische Truhe</span>
+                    <span class="card-desc">Kosten: 150 Blöcke</span>
+                </div>
+                <button class="btn-ui" onclick="startCrateSpin()">Öffnen</button>
+            </div>
+        </div>
+
+        <!-- ARTIFACTS -->
+        <div id="tab-artifacts" class="panel-body">
+            <div class="card">
+                <div class="card-meta">
+                    <span class="card-title">🏆 Stein des Midas</span>
+                    <span class="card-desc">+25% mehr Blöcke dauerhaft</span>
+                    <span class="card-desc">Kosten: 3 Runen</span>
+                </div>
+                <button class="btn-ui" onclick="buyArtifact('midas', 3)">Freischalten</button>
+            </div>
+        </div>
+
+        <!-- PRESTIGE -->
+        <div id="tab-prestige" class="panel-body">
+            <div class="card" style="flex-direction:column; align-items:flex-start; gap:8px;">
+                <span class="card-title" style="color:var(--purple); font-size:1.1rem;">Transzendenz</span>
+                <span class="card-desc">Setze deinen Fortschritt zurück für **Runen**.</span>
+                <span class="card-desc">Erhältlich: <b id="prestige-runes" style="color:var(--gold)">0</b> Runen</span>
+                <button class="btn-ui" style="background:var(--purple); width:100%; margin-top:8px;" onclick="doPrestige()">Zurücksetzen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // === GAME STATE & SAVE ===
+    let db = {
+        blocks: 0,
+        runes: 0,
+        clickPwr: 1,
+        autoPwr: 0,
+        critChance: 0.02,
+        pickMult: 1,
+        biomeIdx: 0,
+        costs: { click: 10, auto: 25, crit: 100 },
+        unlockedPicks: ['wood'],
+        artifacts: { midas: false },
+        cds: { tnt: 0, drill: 0, nuke: 0 },
+        lastSave: Date.now()
+    };
+
+    const biomes = [
+        { name: "Ebene", color: 0x22c55e },
+        { name: "Höhle", color: 0x6b7280 },
+        { name: "Wüste", color: 0xeab308 },
+        { name: "Hölle", color: 0xef4444 },
+        { name: "Mond", color: 0x38bdf8 }
+    ];
+
+    // === THREE.JS 3D ENGINE ===
+    const view = document.getElementById('view-3d');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, view.clientWidth / view.clientHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas-render'), antialias: true, alpha: true });
+    
+    renderer.setSize(view.clientWidth, view.clientHeight);
+    camera.position.set(0, 0, 4);
+
+    // 3D Block Mesh
+    const bGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+    const bMat = new THREE.MeshStandardMaterial({ color: biomes[0].color, roughness: 0.5 });
+    const blockMesh = new THREE.Mesh(bGeo, bMat);
+    scene.add(blockMesh);
+
+    // 3D Pickaxe Mesh (Pivot Pivot Point Simulation)
+    const pickGroup = new THREE.Group();
+    const pHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.2), new THREE.MeshBasicMaterial({ color: 0x78350f }));
+    const pHead = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.12, 0.12), new THREE.MeshBasicMaterial({ color: 0xd1d5db }));
+    pHead.position.y = 0.5;
+    pickGroup.add(pHandle, pHead);
+    pickGroup.position.set(0.9, -0.2, 1);
+    pickGroup.rotation.z = -Math.PI / 4;
+    scene.add(pickGroup);
+
+    // Lighting
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(3, 4, 5);
+    scene.add(dirLight, new THREE.AmbientLight(0x404040));
+
+    // Audio Synth
+    const audio = new (window.AudioContext || window.webkitAudioContext)();
+    function playSfx(freq, type, duration) {
+        if (audio.state === 'suspended') audio.resume();
+        const osc = audio.createOscillator();
+        const gain = audio.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audio.currentTime);
+        gain.gain.setValueAtTime(0.1, audio.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audio.destination);
+        osc.start();
+        osc.stop(audio.currentTime + duration);
+    }
+
+    // === GAMEPLAY ACTIONS ===
+    function hitBlock(e) {
+        let isCrit = Math.random() < db.critChance;
+        let bonus = db.artifacts.midas ? 1.25 : 1.0;
+        let dmg = Math.floor(db.clickPwr * db.pickMult * (isCrit ? 5 : 1) * bonus);
+        
+        db.blocks += dmg;
+        playSfx(isCrit ? 300 : 120, 'sine', 0.08);
+
+        // Pickaxe Swing Animation
+        pickGroup.rotation.z = -Math.PI / 2;
+        blockMesh.scale.set(0.9, 0.9, 0.9);
+        setTimeout(() => {
+            pickGroup.rotation.z = -Math.PI / 4;
+            blockMesh.scale.set(1, 1, 1);
+        }, 80);
+
+        if(e) spawnPopText(e.clientX, e.clientY, `+${dmg}`, isCrit ? '#ef4444' : '#ffcc00');
+        checkBiome();
+        updateUI();
+    }
+
+    function checkBiome() {
+        let idx = Math.min(Math.floor(db.blocks / 500), biomes.length - 1);
+        if(idx !== db.biomeIdx) {
+            db.biomeIdx = idx;
+            bMat.color.setHex(biomes[idx].color);
+        }
+    }
+
+    // === ABILITIES ===
+    function castAbility(type) {
+        if(db.cds[type] > 0) return;
+        if(type === 'tnt') {
+            db.blocks += db.clickPwr * 40;
+            playSfx(60, 'sawtooth', 0.3);
+            db.cds.tnt = 15;
+        } else if(type === 'drill') {
+            let count = 0;
+            let t = setInterval(() => { hitBlock(null); count++; if(count >= 15) clearInterval(t); }, 60);
+            db.cds.drill = 25;
+        } else if(type === 'nuke') {
+            db.blocks += db.clickPwr * 200;
+            playSfx(40, 'square', 0.5);
+            db.cds.nuke = 60;
+        }
+    }
+
+    setInterval(() => {
+        for(let k in db.cds) { if(db.cds[k] > 0) db.cds[k]--; }
+        if(db.autoPwr > 0) { db.blocks += db.autoPwr * db.pickMult; checkBiome(); }
+        updateUI();
+    }, 1000);
+
+    // === CRATE SPINNER ANIMATION ===
+    function startCrateSpin() {
+        if(db.blocks < 150) return;
+        db.blocks -= 150;
+        updateUI();
+
+        const modal = document.getElementById('crate-modal');
+        const track = document.getElementById('spinner-track');
+        const claimBtn = document.getElementById('btn-claim');
+        modal.style.display = 'flex';
+        claimBtn.style.display = 'none';
+
+        track.style.transition = 'none';
+        track.style.transform = 'translateX(0px)';
+        track.innerHTML = '';
+
+        const items = ['🪵', '🪙', '💎', '🔮', '💣'];
+        for(let i=0; i<30; i++) {
+            let el = document.createElement('div');
+            el.className = 'spinner-item';
+            el.innerText = items[Math.floor(Math.random()*items.length)];
+            track.appendChild(el);
+        }
+
+        setTimeout(() => {
+            track.style.transition = 'transform 3s cubic-bezier(0.15, 0.9, 0.2, 1)';
+            track.style.transform = 'translateX(-1800px)';
+        }, 50);
+
+        setTimeout(() => {
+            claimBtn.style.display = 'block';
+            db.blocks += 300; // Reward
+        }, 3100);
+    }
+
+    function closeCrateModal() {
+        document.getElementById('crate-modal').style.display = 'none';
+        updateUI();
+    }
+
+    // === SHOP & UPGRADES ===
+    function buy(type) {
+        if(db.blocks >= db.costs[type]) {
+            db.blocks -= db.costs[type];
+            if(type === 'click') db.clickPwr++;
+            if(type === 'auto') db.autoPwr++;
+            if(type === 'crit') db.critChance += 0.02;
+            db.costs[type] = Math.floor(db.costs[type] * 1.5);
+            updateUI();
+        }
+    }
+
+    function buyPick(id, cost, mult, hex) {
+        if(db.blocks >= cost && !db.unlockedPicks.includes(id)) {
+            db.blocks -= cost;
+            db.unlockedPicks.push(id);
+            equipPick(mult, hex);
+        }
+    }
+
+    function equipPick(mult, hex) {
+        db.pickMult = mult;
+        pHead.material.color.setHex(hex);
+    }
+
+    function buyArtifact(id, cost) {
+        if(db.runes >= cost && !db.artifacts[id]) {
+            db.runes -= cost;
+            db.artifacts[id] = true;
+            updateUI();
+        }
+    }
+
+    function doPrestige() {
+        let gain = Math.floor(db.blocks / 2000);
+        if(gain > 0) {
+            db.runes += gain;
+            db.blocks = 0;
+            db.clickPwr = 1;
+            db.autoPwr = 0;
+            db.biomeIdx = 0;
+            updateUI();
+        }
+    }
+
+    // === UI UTILS ===
+    function switchTab(t) {
+        document.querySelectorAll('.panel-body').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.nav-tabs button').forEach(b => b.classList.remove('active'));
+        document.getElementById(`tab-${t}`).classList.add('active');
+        event.target.classList.add('active');
+    }
+
+    function spawnPopText(x, y, txt, col) {
+        const el = document.createElement('div');
+        el.className = 'pop-text';
+        el.innerText = txt;
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        el.style.color = col;
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 600);
+    }
+
+    function updateUI() {
+        document.getElementById('val-blocks').innerText = Math.floor(db.blocks);
+        document.getElementById('val-runes').innerText = db.runes;
+        document.getElementById('val-biome').innerText = biomes[db.biomeIdx].name;
+
+        document.getElementById('c-click').innerText = db.costs.click;
+        document.getElementById('c-auto').innerText = db.costs.auto;
+        document.getElementById('c-crit').innerText = db.costs.crit;
+
+        document.getElementById('b-click').disabled = db.blocks < db.costs.click;
+        document.getElementById('b-auto').disabled = db.blocks < db.costs.auto;
+        document.getElementById('b-crit').disabled = db.blocks < db.costs.crit;
+
+        document.getElementById('cd-tnt').innerText = db.cds.tnt ? `${db.cds.tnt}s` : '';
+        document.getElementById('cd-drill').innerText = db.cds.drill ? `${db.cds.drill}s` : '';
+        document.getElementById('cd-nuke').innerText = db.cds.nuke ? `${db.cds.nuke}s` : '';
+
+        document.getElementById('prestige-runes').innerText = Math.floor(db.blocks / 2000);
+    }
+
+    // Render Loop
+    function animate() {
+        requestAnimationFrame(animate);
+        blockMesh.rotation.y += 0.005;
+        renderer.render(scene, camera);
+    }
+
+    document.getElementById('canvas-render').addEventListener('click', hitBlock);
+    animate();
+    updateUI();
+</script>
+</body>
+</html>
